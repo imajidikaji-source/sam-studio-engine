@@ -1,0 +1,52 @@
+[
+  {
+    "file": "sticker-01.png",
+    "expected_objects": 4,
+    "notes": "clean 2x2 grid"
+  },
+  {
+    "file": "sticker-02.png",
+    "expected_objects": 6,
+    "notes": "clean 2x3 grid"
+  },
+  {
+    "file": "sticker-03.png",
+    "expected_objects": 6,
+    "notes": "clean 2x3 grid"
+  },
+  {
+    "file": "sticker-04.png",
+    "expected_objects": 9,
+    "notes": "clean 3x3 grid"
+  },
+  {
+    "file": "sticker-05.png",
+    "expected_objects": 8,
+    "notes": "clean 2x4 grid"
+  },
+  {
+    "file": "sticker-06.png",
+    "expected_objects": 9,
+    "notes": "clean 3x3 grid"
+  },
+  {
+    "file": "sticker-07.png",
+    "expected_objects": 4,
+    "notes": "touching/overlapping objects (edge case)"
+  },
+  {
+    "file": "sticker-08.png",
+    "expected_objects": 8,
+    "notes": "6 tiny objects (<2% area) + 2 normal (edge case)"
+  },
+  {
+    "file": "sticker-09.png",
+    "expected_objects": 4,
+    "notes": "HARD: white shapes on white background, faint outline"
+  },
+  {
+    "file": "sticker-10.png",
+    "expected_objects": 5,
+    "notes": "soft drop shadows (edge case)"
+  }
+]
