@@ -35,6 +35,15 @@ a product, but only work from the event counts.
   (`metadata.json`). LLM is a protocol: `MuseSparkLLM` (live,
   `muse-spark-1.3`, envelope verified 2026-10-27) or `ScriptedLLM`
   (tests/demos).
+- `sam_engine/discovery.py` — Sprint 4 discovery-first loop
+  (`run_discovery_job`): vision gate (`MuseSparkVision`, image input
+  verified 2026-10-27) returns `{processable, reason, objects}` —
+  rejected images cost ZERO SAM calls — then one segmentation call
+  per selected concept, cutout + SVG + metadata whose name comes from
+  the vision concept (semantic, not positional). Honest limits: the
+  vision list varies run to run (a short list is possible), and
+  multi-instance concepts may return partial coverage — the picker UI
+  must offer "add your own concept" as fallback.
 - Per-job API cost log: `api_calls`, `cost_usd_estimate`
   ($0.0025/image for SAM 3.1), `duration_s` on every job.
 - `scripts/make_sticker_sheets.py` — regenerates the 10-sheet synthetic
@@ -110,5 +119,8 @@ Note: `create_app` is a factory; uvicorn needs `--factory` as shown.
 - Sprint 3: done early (agent loop + Muse Spark live verified +
   metadata; subject mode via same path; XMP/CSV wiring deferred to
   product integration).
-- Sprint 4: credit Worker wiring (1 credit per approved sheet) + UI.
+- Sprint 4: credit Worker wiring (1 credit per approved sheet) + UI +
+  discovery-first picker mode (chunk 1, engine loop, done 2026-10-27:
+  gate + list + per-concept segmentation + selection; live-verified
+  on mosque — domes and minarets segmented individually — and watch).
 - Sprint 5: 30-sheet test set, QA gate, 3-minute demo video, submission.
