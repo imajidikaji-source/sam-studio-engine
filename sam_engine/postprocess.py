@@ -162,6 +162,23 @@ def mask_png_to_svg(
     return out_svg_path
 
 
+def _smooth_mask_edges(mask: Image.Image) -> Image.Image:
+    """Soften raster stair-steps on mask edges (supersampling).
+
+    SAM masks are raster: diagonal curves come out as visible steps at
+    full resolution, and a 1px feather only blurs the steps instead of
+    removing them. Upscaling 2x with LANCZOS, blurring at that scale,
+    then downscaling moves the effective edge by less than a pixel
+    while replacing steps with a smooth gradient. Verified on the
+    mosque test image (2026-10-27): dome curves smooth, thin minaret
+    spires intact — unlike a plain feather 3, which haloes and erodes
+    thin structures.
+    """
+    big = mask.resize((mask.width * 2, mask.height * 2), Image.LANCZOS)
+    big = big.filter(ImageFilter.GaussianBlur(2))
+    return big.resize(mask.size, Image.LANCZOS)
+
+
 def make_cutout(
     image_path: str,
     mask_png_path: str,
@@ -183,14 +200,17 @@ def make_cutout(
         mask = mask_image.convert("L")
     if mask.size != (img_w, img_h):
         mask = mask.resize((img_w, img_h))
-    if feather_px > 0:
-        mask = mask.filter(ImageFilter.GaussianBlur(feather_px))
+    # Geometry (bbox/trim) comes from the RAW mask so smoothing never
+    # shifts or grows the cutout; only the alpha edge is smoothed.
     bbox = mask.getbbox()
     if bbox is None:
         # Empty mask: save a fully transparent 1x1 PNG rather than failing.
         out = Image.new("RGBA", (1, 1), (0, 0, 0, 0))
         out.save(out_path)
         return out_path, (0, 0, 1, 1)
+    mask = _smooth_mask_edges(mask)
+    if feather_px > 0:
+        mask = mask.filter(ImageFilter.GaussianBlur(feather_px))
     rgba.putalpha(mask)
     x0 = max(0, bbox[0] - padding)
     y0 = max(0, bbox[1] - padding)

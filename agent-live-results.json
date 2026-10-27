@@ -1,0 +1,140 @@
+{
+  "envelope_probe": "OK",
+  "runs": [
+    {
+      "image": "mosque",
+      "status": "completed",
+      "final_prompt": "mosque",
+      "attempts": [
+        {
+          "prompt": "mosque",
+          "n": 1,
+          "issues": []
+        }
+      ],
+      "metadata_status": "ok",
+      "objects": [
+        {
+          "index": 0,
+          "bbox": [
+            320,
+            187,
+            736,
+            581
+          ],
+          "metadata": {
+            "name": "main-object",
+            "title": "Main Segmented Object",
+            "keywords": [
+              "object",
+              "product",
+              "commercial",
+              "stock",
+              "isolated"
+            ],
+            "category": "product"
+          }
+        }
+      ]
+    },
+    {
+      "image": "sticker-01",
+      "status": "completed",
+      "final_prompt": "geometric shapes",
+      "attempts": [
+        {
+          "prompt": "geometric shapes",
+          "n": 4,
+          "issues": []
+        }
+      ],
+      "metadata_status": "ok",
+      "objects": [
+        {
+          "index": 0,
+          "bbox": [
+            374,
+            220,
+            152,
+            145
+          ],
+          "metadata": {
+            "name": "bottom-right-product",
+            "title": "Bottom Right Product",
+            "keywords": [
+              "bottom",
+              "right",
+              "product",
+              "commercial",
+              "item"
+            ],
+            "category": "products"
+          }
+        },
+        {
+          "index": 1,
+          "bbox": [
+            20,
+            220,
+            261,
+            162
+          ],
+          "metadata": {
+            "name": "bottom-left-product",
+            "title": "Bottom Left Product",
+            "keywords": [
+              "bottom",
+              "left",
+              "product",
+              "commercial",
+              "item"
+            ],
+            "category": "products"
+          }
+        },
+        {
+          "index": 2,
+          "bbox": [
+            19,
+            18,
+            264,
+            164
+          ],
+          "metadata": {
+            "name": "top-left-product",
+            "title": "Top Left Product",
+            "keywords": [
+              "top",
+              "left",
+              "product",
+              "commercial",
+              "item"
+            ],
+            "category": "products"
+          }
+        },
+        {
+          "index": 3,
+          "bbox": [
+            318,
+            18,
+            265,
+            165
+          ],
+          "metadata": {
+            "name": "top-right-product",
+            "title": "Top Right Product",
+            "keywords": [
+              "top",
+              "right",
+              "product",
+              "commercial",
+              "item"
+            ],
+            "category": "products"
+          }
+        }
+      ]
+    }
+  ]
+}

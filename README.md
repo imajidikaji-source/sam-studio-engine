@@ -28,6 +28,13 @@ a product, but only work from the event counts.
   `GET /sam/jobs/{id}/objects/{idx}/file`, plus batch
   `POST /sam/batch` and `GET /sam/batch/{id}` (aggregate status,
   detection totals, total cost estimate, average duration).
+- `sam_engine/agent.py` — Sprint 3 Muse Spark agent loop
+  (`run_agent_job`): goal → LLM prompt → segmentation → deterministic
+  mask QA (empty / merged suspected) → retry max 3x → `needs_review`
+  on exhaustion, never silent; per-object metadata JSON
+  (`metadata.json`). LLM is a protocol: `MuseSparkLLM` (live,
+  `muse-spark-1.3`, envelope verified 2026-10-27) or `ScriptedLLM`
+  (tests/demos).
 - Per-job API cost log: `api_calls`, `cost_usd_estimate`
   ($0.0025/image for SAM 3.1), `duration_s` on every job.
 - `scripts/make_sticker_sheets.py` — regenerates the 10-sheet synthetic
@@ -100,6 +107,8 @@ Note: `create_app` is a factory; uvicorn needs `--factory` as shown.
 
 - Sprint 2: done (batch endpoint, SVG silhouette, cost log, 10-sheet
   live batch 63/63).
-- Sprint 3: Muse Spark agent QA loop (prompt → mask check → retry → metadata).
+- Sprint 3: done early (agent loop + Muse Spark live verified +
+  metadata; subject mode via same path; XMP/CSV wiring deferred to
+  product integration).
 - Sprint 4: credit Worker wiring (1 credit per approved sheet) + UI.
 - Sprint 5: 30-sheet test set, QA gate, 3-minute demo video, submission.
