@@ -23,6 +23,12 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from .contract import SegmentationProvider, SegmentationRequest
+from .credits import (
+    CreditStore,
+    InsufficientBalanceError,
+    RefundError,
+    UnknownFeatureError,
+)
 from .fake_provider import FakeSegmentationProvider
 from .jobs import Batch, Job, JobStore, run_job
 
@@ -39,6 +45,28 @@ class CreateBatchBody(BaseModel):
     prompt: str
     mode: str = "sheet"
     max_objects: int = 64
+
+
+class GrantBody(BaseModel):
+    license_id: str
+    machine_id: str
+    amount: int
+    tier: str
+    idempotency_key: str
+    is_trial: bool = False
+
+
+class ConsumeBody(BaseModel):
+    license_id: str
+    feature_id: str
+    units: int = 1
+    ref_id: str
+    idempotency_key: str
+
+
+class RefundBody(BaseModel):
+    ref_id: str
+    idempotency_key: str
 
 
 def build_provider_from_env() -> SegmentationProvider:
@@ -86,11 +114,13 @@ def job_to_dict(job: Job) -> dict:
 def create_app(
     provider: SegmentationProvider | None = None,
     base_dir: str | Path = "jobs",
+    credit_store: CreditStore | None = None,
 ) -> FastAPI:
     provider = provider or build_provider_from_env()
     base_dir = Path(base_dir)
     base_dir.mkdir(parents=True, exist_ok=True)
     store = JobStore()
+    credits = credit_store or CreditStore()
     app = FastAPI(title="SAM Studio engine")
 
     @app.post("/sam/jobs")
@@ -199,8 +229,10 @@ def create_app(
                 status_code=409, detail=f"cannot approve a {job.status} job"
             )
         job.approved = True
-        # NOTE: Worker credit commit (idempotency key = job_id) lands in
-        # Sprint 4. Sprint 1 records approval only and charges nothing.
+        # NOTE (Sprint 4 chunk 2): the credit store below is live, but
+        # approve does NOT consume yet — jobs carry no license_id, so
+        # the approve -> consume wiring lands with license plumbing
+        # (later Sprint 4 chunk). Approving still charges nothing.
         return job_to_dict(job)
 
     @app.post("/sam/jobs/{job_id}/cancel")
@@ -227,5 +259,60 @@ def create_app(
             raise HTTPException(status_code=404, detail="object not found")
         path = matches[0].cutout_file or matches[0].mask_file
         return FileResponse(path, media_type="image/png")
+
+    # ---- Credit routes (Sprint 4 chunk 2; reference implementation) ----
+    def _entry_to_dict(entry) -> dict:
+        return {
+            "entry_id": entry.entry_id,
+            "license_id": entry.license_id,
+            "type": entry.type,
+            "amount": entry.amount,
+            "feature_id": entry.feature_id,
+            "ref_id": entry.ref_id,
+            "idempotency_key": entry.idempotency_key,
+            "created_at": entry.created_at,
+            "note": entry.note,
+        }
+
+    @app.get("/credits/balance/{license_id}")
+    async def get_balance(license_id: str) -> dict:
+        return credits.balance(license_id)
+
+    @app.get("/credits/estimate")
+    async def get_estimate(feature_id: str, units: int = 1) -> dict:
+        try:
+            cost = credits.estimate(feature_id, units)
+        except UnknownFeatureError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return {"feature_id": feature_id, "units": units, "cost": cost}
+
+    @app.post("/credits/grant")
+    async def grant_credits(body: GrantBody) -> dict:
+        entry = credits.grant(
+            body.license_id, body.machine_id, body.amount, body.tier,
+            body.idempotency_key, is_trial=body.is_trial,
+        )
+        return _entry_to_dict(entry)
+
+    @app.post("/credits/consume")
+    async def consume_credits(body: ConsumeBody) -> dict:
+        try:
+            entry = credits.consume(
+                body.license_id, body.feature_id, body.units,
+                body.ref_id, body.idempotency_key,
+            )
+        except UnknownFeatureError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except InsufficientBalanceError as exc:
+            raise HTTPException(status_code=402, detail=str(exc)) from exc
+        return _entry_to_dict(entry)
+
+    @app.post("/credits/refund")
+    async def refund_credits(body: RefundBody) -> dict:
+        try:
+            entry = credits.refund(body.ref_id, body.idempotency_key)
+        except RefundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return _entry_to_dict(entry)
 
     return app

@@ -44,6 +44,15 @@ a product, but only work from the event counts.
   vision list varies run to run (a short list is possible), and
   multi-instance concepts may return partial coverage — the picker UI
   must offer "add your own concept" as fallback.
+- `sam_engine/credits.py` — Sprint 4 credit Worker, reference
+  implementation: wallet per license, append-only ledger with UNIQUE
+  idempotency keys, tariff registry (`sam_studio` = 1/sheet at
+  approve), endpoints balance/estimate/consume/refund/grant. Rules
+  verified by tests: grant once per tier, consume idempotent, refund
+  exactly once, balance never negative, ledger reconciles to wallet.
+  Production Cloudflare Worker ports these semantics + license-token
+  auth + durable storage; this in-memory store is NOT the wallet of
+  record.
 - Per-job API cost log: `api_calls`, `cost_usd_estimate`
   ($0.0025/image for SAM 3.1), `duration_s` on every job.
 - `scripts/make_sticker_sheets.py` — regenerates the 10-sheet synthetic
@@ -122,5 +131,7 @@ Note: `create_app` is a factory; uvicorn needs `--factory` as shown.
 - Sprint 4: credit Worker wiring (1 credit per approved sheet) + UI +
   discovery-first picker mode (chunk 1, engine loop, done 2026-10-27:
   gate + list + per-concept segmentation + selection; live-verified
-  on mosque — domes and minarets segmented individually — and watch).
+  on mosque — domes and minarets segmented individually — and watch;
+  chunk 2, credit Worker reference implementation, done 2026-10-28:
+  wallet + ledger + registry + 5 endpoints, idempotency rules tested).
 - Sprint 5: 30-sheet test set, QA gate, 3-minute demo video, submission.
