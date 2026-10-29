@@ -24,10 +24,19 @@ a product, but only work from the event counts.
   Douglas-Peucker simplification; single-color silhouette only).
 - `sam_engine/jobs.py`, `sam_engine/app.py` — job store + FastAPI service:
   `POST /sam/jobs`, `GET /sam/jobs/{id}`, `WS /sam/jobs/{id}/events`,
-  `POST /sam/jobs/{id}/approve`, `POST /sam/jobs/{id}/cancel`,
-  `GET /sam/jobs/{id}/objects/{idx}/file`, plus batch
-  `POST /sam/batch` and `GET /sam/batch/{id}` (aggregate status,
-  detection totals, total cost estimate, average duration).
+  `POST /sam/jobs/{id}/approve` (consumes exactly 1 credit, balance
+  gate, double approve never double-charges), `POST /sam/jobs/{id}/cancel`,
+  `GET /sam/jobs/{id}/objects/{idx}/file` (`?kind=cutout|mask|svg`),
+  plus batch `POST /sam/batch` and `GET /sam/batch/{id}` (aggregate
+  status, detection totals, total cost estimate, average duration).
+- `sam_engine/ui.html` — Sprint 4 demo UI page served at `GET /sam/ui`
+  (static HTML, no build step): image upload/drop, goal-driven and
+  discovery-first modes, picker with "tambah konsep sendiri", mask
+  overlay + result grid, semantic concept names, cost & balance panel,
+  preview → Approve → Export (PNG/SVG; no export upscale —
+  postprocess does not offer one). Backed by `POST /sam/upload`,
+  `POST /sam/discover/scan`, `POST /sam/discover/run`, and
+  `POST /sam/discover/{id}/approve` (same 1-credit rule as jobs).
 - `sam_engine/agent.py` — Sprint 3 Muse Spark agent loop
   (`run_agent_job`): goal → LLM prompt → segmentation → deterministic
   mask QA (empty / merged suspected) → retry max 3x → `needs_review`

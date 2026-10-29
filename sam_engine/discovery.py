@@ -205,6 +205,7 @@ class DiscoveryObject:
     status: str  # ok | review
     cutout_file: str | None = None
     svg_file: str | None = None
+    mask_file: str | None = None
     metadata_name: str = ""
     metadata_title: str = ""
 
@@ -239,8 +240,14 @@ async def run_discovery_job(
         )
     concepts = verdict.objects
     if selected is not None:
+        # Gate-listed concepts the user picked, in gate order, PLUS any
+        # user-typed concept that was not on the gate list ("tambah
+        # konsep sendiri", Sprint 4 chunk 3): the vision list is
+        # non-deterministic across runs, so a custom concept must
+        # survive selection instead of being silently dropped.
         wanted = set(selected)
         concepts = [c for c in concepts if c in wanted]
+        concepts += [c for c in selected if c not in concepts]
     objects: list[DiscoveryObject] = []
     sam_calls = 0
     for concept in concepts:
@@ -278,6 +285,7 @@ async def run_discovery_job(
                     status="review" if obj.area_ratio < 0.005 else "ok",
                     cutout_file=str(cutout_path),
                     svg_file=str(svg_path) if svg_path else None,
+                    mask_file=obj.mask_png_path,
                     metadata_name=concept.lower().replace(" ", "-"),
                     metadata_title=concept,
                 )
@@ -303,6 +311,7 @@ async def run_discovery_job(
                         "status": o.status,
                         "cutout_file": o.cutout_file,
                         "svg_file": o.svg_file,
+                        "mask_file": o.mask_file,
                         "metadata_name": o.metadata_name,
                         "metadata_title": o.metadata_title,
                     }

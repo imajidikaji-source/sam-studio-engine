@@ -1,11 +1,12 @@
 """In-memory job store + runner (spec §4, Sprint 1 subset + Sprint 2 batch).
 
 Two-phase flow (preview -> approve -> credit commit) is structural: the
-job runs, the user previews objects, approve finalizes. The Worker credit
-client (``/credits/balance`` + ``/credits/consume``, idempotency key =
-job_id) lands in Sprint 4 — approve() today only records approval and
-never charges anything. ``credit_estimate`` is informational (1 credit per
-sheet, spec §8).
+job runs, the user previews objects, approve finalizes. Sprint 4 chunk 3
+wires approve to the credit store: approve consumes exactly 1 credit
+(``sam_studio`` tariff, per sheet) with idempotency key derived from the
+job id, after a balance gate — double approve never charges twice, and
+a job that never completes (failed/cancelled) never charges anything.
+``credit_estimate`` is informational (1 credit per sheet, spec §8).
 
 Sprint 2 additions: per-job API cost log (``api_calls``,
 ``cost_usd_estimate`` from the provider's ``cost_per_image_usd``) and
@@ -49,7 +50,10 @@ class Job:
     objects: list[ObjectResult] = field(default_factory=list)
     error: str | None = None
     approved: bool = False
+    license_id: str = "demo"
     credit_estimate: int = 1
+    credit_consumed: bool = False
+    credit_entry_id: str | None = None
     cancel_requested: bool = False
     events: list[dict] = field(default_factory=list)
     api_calls: int = 0
@@ -78,13 +82,16 @@ class JobStore:
         self.queues: dict[str, asyncio.Queue] = {}
         self.batches: dict[str, Batch] = {}
 
-    def create(self, req: SegmentationRequest) -> Job:
+    def create(
+        self, req: SegmentationRequest, license_id: str = "demo"
+    ) -> Job:
         job = Job(
             id=uuid.uuid4().hex[:12],
             image_path=req.image_path,
             prompt=req.prompt,
             mode=req.mode,
             max_objects=req.max_objects,
+            license_id=license_id,
         )
         self.jobs[job.id] = job
         self.queues[job.id] = asyncio.Queue()

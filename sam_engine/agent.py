@@ -214,7 +214,11 @@ class AgentResult:
     final_prompt: str
     attempts: list[Attempt] = field(default_factory=list)
     objects: list[AgentObject] = field(default_factory=list)
-    metadata_status: str = "not_attempted"  # ok | partial | failed
+    # ok | partial | failed | deferred | not_attempted. "deferred" is
+    # Sprint 4 chunk 3: preview must not spend LLM metadata calls, so
+    # a deferred run skips metadata until attach_metadata() runs after
+    # approve.
+    metadata_status: str = "not_attempted"
     failure_reason: str | None = None
 
 
@@ -270,6 +274,115 @@ def _parse_metadata(text: str, n_objects: int) -> dict[int, ObjectMetadata]:
     return out
 
 
+async def _generate_metadata(
+    llm: AgentLLM, objects_desc: str, n_objects: int,
+) -> tuple[dict[int, ObjectMetadata], str]:
+    """One metadata LLM call + one repair retry on bad JSON.
+
+    Returns (metadata by index, status). Raises nothing: unparseable
+    output after the repair retry yields ({}, "failed").
+    """
+    try:
+        metadata = _parse_metadata(
+            await llm.complete(METADATA_TEMPLATE.format(objects=objects_desc)),
+            n_objects,
+        )
+        return metadata, "ok" if len(metadata) == n_objects else "partial"
+    except (ValueError, KeyError, TypeError):
+        pass
+    try:
+        metadata = _parse_metadata(
+            await llm.complete(
+                METADATA_TEMPLATE.format(objects=objects_desc)
+                + "\nYour previous reply was not valid JSON. "
+                "Reply with ONLY the JSON array."
+            ),
+            n_objects,
+        )
+        return metadata, "ok" if len(metadata) == n_objects else "partial"
+    except (ValueError, KeyError, TypeError):
+        return {}, "failed"
+
+
+def _write_agent_metadata(
+    out_dir: Path,
+    goal: str,
+    status: str,
+    final_prompt: str,
+    attempts: list[Attempt],
+    metadata_status: str,
+    agent_objects: list[AgentObject],
+) -> None:
+    (out_dir / "metadata.json").write_text(
+        json.dumps(
+            {
+                "goal": goal,
+                "status": status,
+                "final_prompt": final_prompt,
+                "attempts": [
+                    {"prompt": a.prompt, "n_objects": a.n_objects,
+                     "issues": a.issues}
+                    for a in attempts
+                ],
+                "metadata_status": metadata_status,
+                "objects": [
+                    {
+                        "index": o.index,
+                        "bbox": o.bbox,
+                        "area_ratio": o.area_ratio,
+                        "score": o.score,
+                        "status": o.status,
+                        "cutout_file": o.cutout_file,
+                        "svg_file": o.svg_file,
+                        "metadata": (
+                            {
+                                "name": o.metadata.name,
+                                "title": o.metadata.title,
+                                "keywords": o.metadata.keywords,
+                                "category": o.metadata.category,
+                            }
+                            if o.metadata
+                            else None
+                        ),
+                    }
+                    for o in agent_objects
+                ],
+            },
+            indent=2,
+        )
+        + "\n"
+    )
+
+
+async def attach_metadata(
+    llm: AgentLLM, result: AgentResult, out_dir: str | Path,
+) -> AgentResult:
+    """Generate LLM metadata for a deferred run — the post-approve step.
+
+    Only runs on a completed run whose metadata is still "deferred";
+    any other state is returned unchanged (never double-generates).
+    """
+    if result.status != "completed" or result.metadata_status != "deferred":
+        return result
+    out_dir = Path(out_dir)
+    objects_desc = "\n".join(
+        f"- {o.index}: bbox={o.bbox}, area={o.area_ratio:.3f}, "
+        f"score={o.score}"
+        for o in result.objects
+    )
+    metadata, status = await _generate_metadata(
+        llm, objects_desc, len(result.objects)
+    )
+    for obj in result.objects:
+        obj.metadata = metadata.get(obj.index)
+    result.metadata_status = status
+    _write_agent_metadata(
+        out_dir, result.goal, result.status, result.final_prompt,
+        result.attempts, result.metadata_status, result.objects,
+    )
+    return result
+
+
 async def run_agent_job(
     image_path: str,
     goal: str,
@@ -278,8 +391,15 @@ async def run_agent_job(
     out_dir: str | Path,
     mode: str = "sheet",
     max_objects: int = 64,
+    defer_metadata: bool = False,
 ) -> AgentResult:
-    """Run the full agent loop; writes cutouts + metadata.json to out_dir."""
+    """Run the full agent loop; writes cutouts + metadata.json to out_dir.
+
+    With ``defer_metadata=True`` (Sprint 4 chunk 3) the loop completes
+    segmentation + QA + assets but makes NO metadata LLM call — preview
+    must not spend a metadata call on a sheet the user may reject.
+    Metadata is then generated post-approve via ``attach_metadata``.
+    """
     from .contract import SegmentationRequest
 
     out_dir = Path(out_dir)
@@ -329,40 +449,22 @@ async def run_agent_job(
             failure_reason="; ".join(attempts[-1].issues),
         )
 
-    # Success path: metadata + asset files.
-    objects_desc = "\n".join(
-        f"- {o.index}: bbox={o.bbox}, area={o.area_ratio:.3f}, "
-        f"score={o.score}"
-        for o in best_objects
-    )
+    # Success path: assets + metadata. With defer_metadata (Sprint 4
+    # chunk 3) the metadata LLM call is skipped entirely here — preview
+    # must not spend a metadata call on a sheet the user may reject.
+    # Metadata is generated post-approve via attach_metadata().
     metadata: dict[int, ObjectMetadata] = {}
-    metadata_status = "failed"
-    try:
-        metadata = _parse_metadata(
-            await llm.complete(
-                METADATA_TEMPLATE.format(objects=objects_desc)
-            ),
-            len(best_objects),
+    if defer_metadata:
+        metadata_status = "deferred"
+    else:
+        objects_desc = "\n".join(
+            f"- {o.index}: bbox={o.bbox}, area={o.area_ratio:.3f}, "
+            f"score={o.score}"
+            for o in best_objects
         )
-        metadata_status = (
-            "ok" if len(metadata) == len(best_objects) else "partial"
+        metadata, metadata_status = await _generate_metadata(
+            llm, objects_desc, len(best_objects)
         )
-    except (ValueError, KeyError, TypeError):
-        # One repair retry with a stricter instruction.
-        try:
-            metadata = _parse_metadata(
-                await llm.complete(
-                    METADATA_TEMPLATE.format(objects=objects_desc)
-                    + "\nYour previous reply was not valid JSON. "
-                    "Reply with ONLY the JSON array."
-                ),
-                len(best_objects),
-            )
-            metadata_status = (
-                "ok" if len(metadata) == len(best_objects) else "partial"
-            )
-        except (ValueError, KeyError, TypeError):
-            metadata_status = "failed"
 
     agent_objects: list[AgentObject] = []
     for obj in best_objects:

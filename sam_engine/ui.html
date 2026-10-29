@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SAM Studio — Demo Engine</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 0 auto; max-width: 960px; padding: 16px; color: #1b2a4a; }
+  h1 { font-size: 1.4em; }
+  h2 { font-size: 1.1em; margin-top: 28px; }
+  .panel { border: 1px solid #ccc; border-radius: 8px; padding: 12px; margin: 12px 0; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 6px 0; }
+  button { padding: 6px 14px; cursor: pointer; }
+  button:disabled { cursor: not-allowed; opacity: 0.5; }
+  input[type="text"], select { padding: 6px; }
+  #dropzone { border: 2px dashed #2d99d2; border-radius: 8px; padding: 24px; text-align: center; cursor: pointer; }
+  #dropzone.drag { background: #eaf6fd; }
+  #preview-img { max-width: 100%; display: none; margin-top: 8px; }
+  .grid { display: flex; flex-wrap: wrap; gap: 12px; }
+  .card { border: 1px solid #ddd; border-radius: 8px; padding: 8px; width: 180px; }
+  .card img { max-width: 100%; }
+  .card .name { font-weight: bold; }
+  .card .meta { font-size: 0.85em; color: #555; }
+  #overlay-wrap { position: relative; display: inline-block; max-width: 100%; }
+  #overlay-wrap img.base { max-width: 100%; display: block; }
+  #overlay-wrap img.mask { position: absolute; left: 0; top: 0; width: 100%; height: 100%; opacity: 0.45; pointer-events: none; }
+  .msg { color: #b00020; }
+  .ok { color: #1a7a1a; }
+  .note { font-size: 0.85em; color: #555; }
+</style>
+</head>
+<body>
+<h1 id="sam-studio-ui">SAM Studio — Demo Engine</h1>
+<p class="note">Halaman demo engine (dilayani sidecar). Bukan halaman produk OmniStock.
+Pratinjau 0 kredit — kredit hanya dipotong saat Approve (1 kredit per sheet).</p>
+
+<div class="panel" id="license-panel">
+  <h2>Lisensi, Saldo &amp; Biaya</h2>
+  <div class="row">
+    <label for="license">Lisensi:</label>
+    <input type="text" id="license" value="demo">
+    <button id="btn-balance">Perbarui Saldo</button>
+  </div>
+  <div class="row">
+    <span>Saldo: <strong id="balance">-</strong> kredit</span>
+    <span>Biaya per sheet: <strong id="estimate">-</strong> kredit</span>
+  </div>
+  <p id="balance-msg" class="msg"></p>
+</div>
+
+<div class="panel">
+  <h2>1. Gambar</h2>
+  <div id="dropzone">Tarik &amp; letakkan gambar di sini, atau klik untuk memilih file
+    <input type="file" id="file-input" accept="image/*" hidden>
+  </div>
+  <img id="preview-img" alt="pratinjau gambar">
+  <p id="upload-msg"></p>
+</div>
+
+<div class="panel">
+  <h2>2. Mode</h2>
+  <div class="row">
+    <label><input type="radio" name="mode" value="goal" checked> goal-driven</label>
+    <label><input type="radio" name="mode" value="discovery"> discovery-first</label>
+  </div>
+
+  <div id="goal-panel">
+    <div class="row">
+      <label for="goal">Tujuan:</label>
+      <input type="text" id="goal" placeholder="mis. pisahkan stiker di sheet ini" size="40">
+      <label for="job-mode">Mode:</label>
+      <select id="job-mode">
+        <option value="sheet" selected>sheet</option>
+        <option value="subject">subject</option>
+      </select>
+      <button id="btn-goal">Mulai Segmentasi</button>
+    </div>
+    <p class="note">Jalur goal-driven memakai rute job yang sudah ada. Pratinjau
+    tidak memanggil LLM metadata — metadata LLM hanya jalan setelah Approve.</p>
+  </div>
+
+  <div id="discovery-panel" hidden>
+    <div class="row">
+      <button id="btn-scan">Scan (gate vision)</button>
+      <span id="gate-msg"></span>
+    </div>
+    <div id="picker" hidden>
+      <p>Pilih konsep yang mau disegmentasi:</p>
+      <div id="concept-list" class="row"></div>
+      <div class="row">
+        <label for="custom-concept">tambah konsep sendiri:</label>
+        <input type="text" id="custom-concept" placeholder="mis. menara">
+        <button id="btn-add-concept">Tambah</button>
+      </div>
+      <div class="row">
+        <button id="btn-segment">Segmentasi terpilih</button>
+      </div>
+      <p class="note">Daftar vision tidak deterministik antar run — bila konsep
+      yang kamu cari tidak ada di daftar, ketik sendiri di atas.</p>
+    </div>
+  </div>
+</div>
+
+<div class="panel" id="result-panel" hidden>
+  <h2>3. Pratinjau</h2>
+  <p id="status-line"></p>
+  <div class="row">
+    <button id="btn-view-grid">Grid hasil</button>
+    <button id="btn-view-overlay">Overlay mask</button>
+  </div>
+  <div id="grid-view" class="grid"></div>
+  <div id="overlay-view" hidden>
+    <div id="overlay-wrap"></div>
+  </div>
+  <h2>4. Approve &amp; Ekspor</h2>
+  <div class="row">
+    <button id="btn-approve">Approve (1 kredit)</button>
+    <span id="approve-msg"></span>
+  </div>
+  <p id="approve-hint" class="msg"></p>
+  <div id="export-view" hidden>
+    <p class="ok">Disetujui. Ekspor tersedia PNG dan SVG per objek (lihat tautan di tiap kartu).</p>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const state = { imagePath: null, imageDataUrl: null, jobId: null, discoveryId: null, balance: 0, estimate: 1, kind: null };
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+}
+async function api(path, method, body) {
+  const res = await fetch(path, {
+    method: method || "GET",
+    headers: body ? {"Content-Type": "application/json"} : {},
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || ("HTTP " + res.status));
+  return data;
+}
+
+async function refreshBalance() {
+  const licenseId = $("license").value.trim() || "demo";
+  try {
+    const bal = await api("/credits/balance/" + encodeURIComponent(licenseId));
+    state.balance = bal.balance;
+    $("balance").textContent = bal.balance;
+    const est = await api("/credits/estimate?feature_id=sam_studio&units=1");
+    state.estimate = est.cost;
+    $("estimate").textContent = est.cost;
+    updateApproveState();
+    $("balance-msg").textContent = "";
+  } catch (e) {
+    $("balance-msg").textContent = "Gagal membaca saldo: " + e.message;
+  }
+}
+function updateApproveState() {
+  const btn = $("btn-approve");
+  const hint = $("approve-hint");
+  if (!state.jobId && !state.discoveryId) {
+    btn.disabled = true;
+    hint.textContent = "Belum ada pratinjau.";
+    return;
+  }
+  if (state.balance < state.estimate) {
+    btn.disabled = true;
+    hint.textContent = "Saldo tidak cukup — approve butuh " + state.estimate +
+      " kredit, saldo kamu " + state.balance + " kredit.";
+  } else {
+    btn.disabled = false;
+    hint.textContent = "";
+  }
+}
+$("btn-balance").onclick = refreshBalance;
+$("license").onchange = refreshBalance;
+
+async function uploadFile(file) {
+  const dataUrl = await new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result);
+    r.onerror = reject;
+    r.readAsDataURL(file);
+  });
+  const base64 = dataUrl.split(",", 2)[1];
+  const up = await api("/sam/upload", "POST", {filename: file.name, image_base64: base64});
+  state.imagePath = up.image_path;
+  state.imageDataUrl = dataUrl;
+  $("preview-img").src = dataUrl;
+  $("preview-img").style.display = "block";
+  $("upload-msg").textContent = "Ter-upload: " + up.image_path;
+}
+const dz = $("dropzone");
+dz.onclick = () => $("file-input").click();
+$("file-input").onchange = (e) => { if (e.target.files[0]) uploadFile(e.target.files[0]).catch((err) => { $("upload-msg").textContent = "Gagal upload: " + err.message; }); };
+dz.ondragover = (e) => { e.preventDefault(); dz.classList.add("drag"); };
+dz.ondragleave = () => dz.classList.remove("drag");
+dz.ondrop = (e) => {
+  e.preventDefault(); dz.classList.remove("drag");
+  if (e.dataTransfer.files[0]) uploadFile(e.dataTransfer.files[0]).catch((err) => { $("upload-msg").textContent = "Gagal upload: " + err.message; });
+};
+
+function currentMode() {
+  return document.querySelector('input[name="mode"]:checked').value;
+}
+document.querySelectorAll('input[name="mode"]').forEach((r) => {
+  r.onchange = () => {
+    const discovery = currentMode() === "discovery";
+    $("goal-panel").hidden = discovery;
+    $("discovery-panel").hidden = !discovery;
+  };
+});
+
+function showResults(objects, kind) {
+  state.kind = kind;
+  $("result-panel").hidden = false;
+  const grid = $("grid-view");
+  grid.innerHTML = "";
+  objects.forEach((o) => {
+    const name = kind === "discovery" ? (o.metadata_title || o.concept) : ("Objek #" + o.index);
+    const png = kind === "discovery" ? o.file_url : ("/sam/jobs/" + state.jobId + "/objects/" + o.index + "/file");
+    const svg = kind === "discovery" ? o.svg_url : ("/sam/jobs/" + state.jobId + "/objects/" + o.index + "/file?kind=svg");
+    const card = document.createElement("div");
+    card.className = "card";
+    card.innerHTML = '<img src="' + esc(png) + '" alt=""><div class="name">' + esc(name) + '</div>' +
+      '<div class="meta">status: ' + esc(o.status) + " · area: " + (o.area_ratio * 100).toFixed(1) + "%" +
+      (o.score !== null && o.score !== undefined ? " · skor: " + o.score : "") + "</div>" +
+      '<div class="meta"><a href="' + esc(png) + '" target="_blank">PNG</a> · ' +
+      '<a href="' + esc(svg) + '" target="_blank">SVG</a></div>';
+    grid.appendChild(card);
+  });
+  const wrap = $("overlay-wrap");
+  wrap.innerHTML = "";
+  const base = document.createElement("img");
+  base.className = "base";
+  base.src = state.imageDataUrl;
+  wrap.appendChild(base);
+  objects.forEach((o, i) => {
+    const maskUrl = kind === "discovery" ? o.mask_url : ("/sam/jobs/" + state.jobId + "/objects/" + o.index + "/file?kind=mask");
+    const m = document.createElement("img");
+    m.className = "mask";
+    m.src = maskUrl;
+    m.style.filter = "sepia(1) hue-rotate(" + ((i * 67) % 360) + "deg) saturate(3)";
+    wrap.appendChild(m);
+  });
+  $("grid-view").hidden = false;
+  $("overlay-view").hidden = true;
+  updateApproveState();
+}
+$("btn-view-grid").onclick = () => { $("grid-view").hidden = false; $("overlay-view").hidden = true; };
+$("btn-view-overlay").onclick = () => { $("grid-view").hidden = true; $("overlay-view").hidden = false; };
+
+$("btn-goal").onclick = async () => {
+  if (!state.imagePath) { alert("Upload gambar dulu."); return; }
+  const goal = $("goal").value.trim();
+  if (!goal) { alert("Isi tujuan dulu."); return; }
+  $("status-line").textContent = "Menjalankan job…";
+  $("result-panel").hidden = false;
+  try {
+    const created = await api("/sam/jobs", "POST", {
+      image_path: state.imagePath, prompt: goal,
+      mode: $("job-mode").value, license_id: $("license").value.trim() || "demo",
+    });
+    state.jobId = created.job_id;
+    state.discoveryId = null;
+    let job;
+    for (;;) {
+      job = await api("/sam/jobs/" + state.jobId);
+      if (job.status === "completed" || job.status === "failed") break;
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    if (job.status !== "completed") {
+      $("status-line").textContent = "Job gagal: " + (job.error || "?");
+      return;
+    }
+    $("status-line").textContent = "Selesai: " + job.objects.length + " objek. Pratinjau 0 kredit.";
+    showResults(job.objects, "job");
+    $("export-view").hidden = true;
+    $("approve-msg").textContent = "";
+  } catch (e) {
+    $("status-line").textContent = "Gagal: " + e.message;
+  }
+};
+
+$("btn-scan").onclick = async () => {
+  if (!state.imagePath) { alert("Upload gambar dulu."); return; }
+  $("gate-msg").textContent = "Memindai…";
+  try {
+    const scan = await api("/sam/discover/scan", "POST", {image_path: state.imagePath});
+    if (scan.gate === "not_configured") {
+      $("gate-msg").textContent = "Gate vision tidak terkonfigurasi di demo ini — ketik konsep sendiri di bawah.";
+    } else if (!scan.processable) {
+      $("gate-msg").textContent = "Ditolak gate: " + scan.reason;
+      return;
+    } else {
+      $("gate-msg").textContent = "Gate lolos: " + scan.reason;
+    }
+    const list = $("concept-list");
+    list.innerHTML = "";
+    (scan.objects || []).forEach((c) => {
+      const label = document.createElement("label");
+      const box = document.createElement("input");
+      box.type = "checkbox"; box.value = c; box.checked = true;
+      label.appendChild(box);
+      label.appendChild(document.createTextNode(" " + c));
+      list.appendChild(label);
+    });
+    $("picker").hidden = false;
+  } catch (e) {
+    $("gate-msg").textContent = "Gagal scan: " + e.message;
+  }
+};
+$("btn-add-concept").onclick = () => {
+  const input = $("custom-concept");
+  const c = input.value.trim();
+  if (!c) return;
+  const list = $("concept-list");
+  const existing = Array.from(list.querySelectorAll("input")).map((b) => b.value);
+  if (existing.includes(c)) { input.value = ""; return; }
+  const label = document.createElement("label");
+  const box = document.createElement("input");
+  box.type = "checkbox"; box.value = c; box.checked = true;
+  label.appendChild(box);
+  label.appendChild(document.createTextNode(" " + c));
+  list.appendChild(label);
+  input.value = "";
+};
+$("btn-segment").onclick = async () => {
+  if (!state.imagePath) { alert("Upload gambar dulu."); return; }
+  const selected = Array.from($("concept-list").querySelectorAll("input:checked")).map((b) => b.value);
+  if (!selected.length) { alert("Pilih minimal satu konsep."); return; }
+  $("status-line").textContent = "Mensegmentasi " + selected.length + " konsep…";
+  $("result-panel").hidden = false;
+  try {
+    const run = await api("/sam/discover/run", "POST", {
+      image_path: state.imagePath, selected: selected,
+      mode: "subject", license_id: $("license").value.trim() || "demo",
+    });
+    if (run.status !== "completed") {
+      $("status-line").textContent = "Discovery ditolak: " + (run.failure_reason || "?");
+      return;
+    }
+    state.discoveryId = run.discovery_id;
+    state.jobId = null;
+    $("status-line").textContent = "Selesai: " + run.objects.length + " objek dari " +
+      run.sam_calls + " panggilan segmentasi. Nama objek memakai nama konsep semantik. Pratinjau 0 kredit.";
+    showResults(run.objects, "discovery");
+    $("export-view").hidden = true;
+    $("approve-msg").textContent = "";
+  } catch (e) {
+    $("status-line").textContent = "Gagal: " + e.message;
+  }
+};
+
+$("btn-approve").onclick = async () => {
+  try {
+    if (state.jobId) {
+      await api("/sam/jobs/" + state.jobId + "/approve", "POST", {});
+    } else if (state.discoveryId) {
+      await api("/sam/discover/" + state.discoveryId + "/approve", "POST", {});
+    } else {
+      return;
+    }
+    $("approve-msg").textContent = "Disetujui — 1 kredit dipotong.";
+    $("export-view").hidden = false;
+    await refreshBalance();
+  } catch (e) {
+    $("approve-msg").textContent = "Approve gagal: " + e.message;
+  }
+};
+
+refreshBalance();
+</script>
+</body>
+</html>

@@ -3,17 +3,26 @@ import time
 from fastapi.testclient import TestClient
 
 from sam_engine.app import create_app
+from sam_engine.credits import CreditStore
 from sam_engine.fake_provider import FakeSegmentationProvider
 
 
-def _client(tmp_path):
+def _client(tmp_path, credit_store=None):
     return TestClient(
-        create_app(provider=FakeSegmentationProvider(), base_dir=tmp_path / "jobs")
+        create_app(
+            provider=FakeSegmentationProvider(),
+            base_dir=tmp_path / "jobs",
+            credit_store=credit_store,
+        )
     )
 
 
 def test_job_lifecycle(sheet_image, tmp_path):
-    with _client(tmp_path) as client:
+    # Sprint 4 chunk 3: approve consumes 1 credit, so the lifecycle
+    # test funds the demo wallet first (balance gate would 402).
+    store = CreditStore()
+    store.grant("demo", "machine-1", 5, "pro", "grant-1")
+    with _client(tmp_path, credit_store=store) as client:
         created = client.post("/sam/jobs", json={
             "image_path": sheet_image, "prompt": "every sticker", "mode": "sheet",
         })
